@@ -91,6 +91,7 @@
 				"Engine": {
 					"Ref": "DBEngineType"
 				},
+				"EngineVersion": "setbyLambdaTransform",
 				"MasterUsername": {
 					"Ref": "DBUserName"
 				},

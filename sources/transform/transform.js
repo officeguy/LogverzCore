@@ -617,17 +617,27 @@ async function verifydeploymentconfigavailability (rdsclient, event, DBdeploymen
 function mergedbproperties (event, dbconfig) {
   // set DB configuration to equal generated values also set cloudformation database type condition to appopiate DB type
 
-  var EngineVerProperty = {
-    EngineVersion: dbconfig.EngineVersion
-  }
+
 
   var EngineTypeProperty = {
     Engine: dbconfig.DBEngineType
   }
 
+  var EngineVerProperty = {
+    EngineVersion: dbconfig.EngineVersion
+  }
+
   if (dbconfig.DBdeploymentMethod === 'Server') {
-    _.merge(event.fragment.Resources.LogverzDB.Properties, EngineVerProperty)
-    _.merge(event.fragment.Resources.LogverzDB.Properties, EngineTypeProperty)
+    if (event.fragment.Resources.LogverzDB.Properties.EngineVersion === "setbyLambdaTransform"){
+      // use automation to determine the new version of the DB. 
+      
+      _.merge(event.fragment.Resources.LogverzDB.Properties, EngineTypeProperty)
+      _.merge(event.fragment.Resources.LogverzDB.Properties, EngineVerProperty)
+    }
+    else{
+      // if customer specified a version (value is not equal to 'setbyLambdaTransform'), than we leave it as is 
+      _.merge(event.fragment.Resources.LogverzDB.Properties, EngineTypeProperty)
+    }
     event.fragment.Mappings.DeploymentType.Serverless.Value = 'false'
     event.fragment.Mappings.DeploymentType.Server.Value = 'true'
   }

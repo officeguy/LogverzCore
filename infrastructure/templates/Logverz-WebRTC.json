@@ -30,7 +30,7 @@
 		"InitBucket":{
 			"Type": "String"
 		},
-		"LogicBucket":{
+		"WebRTCBucket":{
 			"Type": "String"
 		},
 		"APIGWLogverzLogic":{
@@ -72,9 +72,10 @@
 			"nano":{"Memory":300, "Cpu":"1024"},
 			"micro":{"Memory":800, "Cpu":"1024"},
 			"small":{"Memory":1800, "Cpu":"1024"},
-			"medium":{"Memory":3800, "Cpu":"1024"},
-			"large":{"Memory":3800, "Cpu":"1024"},
-			"xlarge":{"Memory":8000, "Cpu":"2048"}
+			"medium":{"Memory":3800, "Cpu":"2048"},
+			"large":{"Memory":3800, "Cpu":"2048"},
+			"xlarge":{"Memory":16000, "Cpu":"4096"},
+			"2xlarge":{"Memory":32000, "Cpu":"8192"}
 		}
 	},
 	"Conditions": {
@@ -264,6 +265,9 @@
 						"Arn" : {"Fn::GetAtt": ["LogverzWebRTCInstanceProfile", "Arn"]}
 					},
 					"InstanceInitiatedShutdownBehavior":"terminate",
+					"MetadataOptions":{
+						"HttpTokens":"required"
+					},
 					"Monitoring":{
 						"Enabled" : "true"
 					},
@@ -277,8 +281,8 @@
 					],
 					"UserData":{
 						"Fn::Base64" : {
-							"Fn::Sub": [ "#!/bin/bash\nwget -O /home/ec2-user/identitydocument http://169.254.169.254:80/latest/dynamic/instance-identity/document\ncurl https://packages.microsoft.com/config/rhel/7/prod.repo | sudo tee /etc/yum.repos.d/microsoft.repo\naws s3 cp s3://${bucketname}/bin/webrtcproxycontrol.zip /home/ec2-user/webrtcproxycontrol.zip\n#Grabbing PS installer from local storage because of MS outage @18.06.21\npsversion=$(aws s3 ls ${bucketname}/bin/ |grep powershell|grep rpm| head -n 1 | awk '{print $4}')\naws s3 cp s3://${bucketname}/bin/$psversion /home/ec2-user/$psversion\n\nsudo yum install -y jq htop\nsudo yum localinstall -y /home/ec2-user/$psversion\nsudo amazon-linux-extras install docker\nsudo service docker start\nsudo usermod -a -G docker ec2-user\n[ -f /usr/bin/jq ] && echo \"JQ dependencies install success\" || $(echo \"JQ dependency install failure\";init 0;)\n[ -f /usr/bin/docker ] && echo \"Docker dependency install success\" || $(echo \"Docker dependency install failure\"; init 0;)\n\nInstanceId=$(cat /home/ec2-user/identitydocument  |jq --raw-output .instanceId)\nASGTags=$(aws ec2 describe-tags --region ${AWS::Region} --filters \"Name=resource-id,Values=$InstanceId\")\nASGValue=$(echo $ASGTags| jq --raw-output '.Tags[] | select(.Key==\"aws:autoscaling:groupName\") | .Value')\n\necho $ASGValue > /home/ec2-user/ASGName\necho ${AWS::Region} > /home/ec2-user/Region\necho ${taskmemorysize} > /home/ec2-user/taskmemorysize\necho $(date +%s) >/home/ec2-user/serverstarttime\n\nsudo pwsh -Command \"Expand-Archive -Path /home/ec2-user/webrtcproxycontrol.zip -DestinationPath /home/ec2-user/ &&Copy-Item /home/ec2-user/webrtcproxycontrol.service,/home/ec2-user/webrtcproxycontrol.timer -Destination /etc/systemd/system/\"\nsystemctl start webrtcproxycontrol\n\nsudo yum update -y",
-								{"bucketname": {"Ref" : "InitBucket" }, "taskmemorysize": { "Fn::FindInMap" : [ "TaskSize", { "Ref" : "WebRTCProxyInstanceSize" }, "Memory"]}
+							"Fn::Sub": [ "#!/bin/bash\nTOKEN=$(curl -X PUT 'http://169.254.169.254/latest/api/token' -H 'X-aws-ec2-metadata-token-ttl-seconds: 21600')\nidentitydocument=$(curl -H \"X-aws-ec2-metadata-token: $TOKEN\" -v http://169.254.169.254/latest/dynamic/instance-identity/document)\necho $identitydocument > /home/ec2-user/identitydocument\necho ${WebRTCBucketname} > /home/ec2-user/webrtcbucket\naws s3 cp s3://${InitBucketname}/bin/webrtcproxycontrol.zip /home/ec2-user/webrtcproxycontrol.zip\n\nsudo dnf install https://github.com/PowerShell/PowerShell/releases/download/v7.4.6/powershell-7.4.6-1.rh.x86_64.rpm -y\nsudo dnf install -y jq htop docker\nsudo service docker start\nsudo usermod -a -G docker ec2-user\n[ -f /usr/bin/jq ] && echo \"JQ dependencies install success\" || $(echo \"JQ dependency install failure\";init 0;)\n[ -f /usr/bin/docker ] && echo \"Docker dependency install success\" || $(echo \"Docker dependency install failure\"; init 0;)\n\nInstanceId=$(cat /home/ec2-user/identitydocument  |jq --raw-output .instanceId)\nASGTags=$(aws ec2 describe-tags --region ${AWS::Region} --filters \"Name=resource-id,Values=$InstanceId\")\nASGValue=$(echo $ASGTags| jq --raw-output '.Tags[] | select(.Key==\"aws:autoscaling:groupName\") | .Value')\n\necho $ASGValue > /home/ec2-user/ASGName\necho ${AWS::Region} > /home/ec2-user/Region\necho ${taskmemorysize} > /home/ec2-user/taskmemorysize\necho $(date +%s) >/home/ec2-user/serverstarttime\n\nsudo pwsh -Command \"Expand-Archive -Path /home/ec2-user/webrtcproxycontrol.zip -DestinationPath /home/ec2-user/ &&Copy-Item /home/ec2-user/webrtcproxycontrol.service,/home/ec2-user/webrtcproxycontrol.timer -Destination /etc/systemd/system/\"\nsudo systemctl start webrtcproxycontrol\n\nsudo yum update -y",
+								{"InitBucketname": {"Ref" : "InitBucket" }, "WebRTCBucketname": {"Ref" : "WebRTCBucket" },"taskmemorysize": { "Fn::FindInMap" : [ "TaskSize", { "Ref" : "WebRTCProxyInstanceSize" }, "Memory"]}
 								}]
 						}
 					},
@@ -604,7 +608,6 @@
 								}
 							}]
 						},
-						"LogicBucket":{"Ref" : "LogicBucket" },
 						"AllowedOrigins":"http://localhost:8080,http://127.0.0.1:8080,https://testapi.logleads.com",
 						"MaximumCacheTime": {"Ref": "MaximumCacheTime"}
 					}

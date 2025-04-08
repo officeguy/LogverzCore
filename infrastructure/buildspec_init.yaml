@@ -39,8 +39,6 @@ phases:
       # - codebuild-breakpoint
       - cd Portal && ./appbuild.sh && npm install --loglevel error && npm run build && mkdir ui
       - mv build/* ui && aws s3 sync ./ui s3://$LogicBucket/ui && cd ..
-      - echo "Checking PowerShell local installer"
-      - ./sources/scripts/pwshdl.sh
   post_build:
     commands:
        - echo "Installing Golang framework, adding dependencies"

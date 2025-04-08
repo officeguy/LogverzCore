@@ -151,7 +151,7 @@ if($env:Environment -eq "Windows"){
 }
 else{
    $environmentpath="/home/ec2-user/";
-   $identitydocument=$($(wget -q -O - http://169.254.169.254:80/latest/dynamic/instance-identity/document)|ConvertFrom-Json);
+   $identitydocument=$(Get-Content -path $($environmentpath+"identitydocument")|ConvertFrom-Json);
    $region=$identitydocument.region;
    $accountId=$identitydocument.accountId;
    $webrtcbucket=Get-Content -path $($environmentpath+"webrtcbucket");
@@ -172,8 +172,8 @@ $containercheck=get-dockercontainer |? {$_.Image -like "*$imagename*"}
 #Startup as heartbeat file does not exists
 if(($null -eq $containercheck) -and (!(test-path -path $heartbeatlocation))){
     #login to ECR
-    Invoke-Expression "sudo su -c `"`$(aws ecr get-login --no-include-email --region $region)`"";
-
+    Invoke-Expression "sudo su -c `"aws ecr get-login-password --region $region | docker login --username AWS --password-stdin $accountId.dkr.ecr.$region.amazonaws.com`"";
+    
     #pull image
     Invoke-Expression "sudo su -c `"docker pull $accountId.dkr.ecr.$region.amazonaws.com/$imagename`"";
 
