@@ -9,6 +9,7 @@ import fs from 'fs'
 import _ from 'lodash'
 import jwt from 'jsonwebtoken'
 import loki from 'lokijs'
+import jp from 'jsonpath'
 
 import { SSMClient, GetParameterCommand, DescribeParametersCommand } from '@aws-sdk/client-ssm'
 import { DynamoDBClient, PutItemCommand } from '@aws-sdk/client-dynamodb'
@@ -40,7 +41,11 @@ if (db.collections.length === 0) {
     MaximumCacheTime = 1
   }
 
-  var identity = db.addCollection('Logverz-Identities', {
+  var identities = db.addCollection('Logverz-Identities', {
+    ttl: MaximumCacheTime * 60 * 1000
+  })
+
+  var ssmcache = db.addCollection('SsmParameters-cache', {
     ttl: MaximumCacheTime * 60 * 1000
   })
 }
@@ -114,7 +119,7 @@ export const handler = async (event, context) => {
   if (tokenobject.state === true) {
     var username = tokenobject.value.Name
     var usertype = tokenobject.value.Type
-    var userattributes = identity.chain().find({
+    var userattributes = identities.chain().find({
       Type: usertype,
       Name: username
     }).data() // .collection.data[0];
@@ -123,7 +128,7 @@ export const handler = async (event, context) => {
       var userattributes = await authenticationshared.getidentityattributes(docClient, QueryCommand, username, usertype)
       console.log('local cache EMPTY -> retrived identity from DynamoDB')
       userattributes = userattributes.Items[0]
-      identity.insert(userattributes)
+      identities.insert(userattributes)
     }
     else {
       console.log('local cache MATCH')
@@ -138,7 +143,7 @@ export const handler = async (event, context) => {
   if (message === 'ok') {
     // its comming from authorized source: aws events or api gateway or stepfunction
     console.log('Calling Main')
-    var reply = await main(context, event, rdsclient, asgclient, ec2client, ddclient, ssmclient, s3client, cipcclient, accclient, commonshared, authenticationshared, _, userattributes, region, accountnumber, UserPoolClient, UserPoolId)
+    var reply = await main(context, event, rdsclient, asgclient, ec2client, ddclient, ssmclient, s3client, cipcclient, accclient, docClient, commonshared, authenticationshared, _, userattributes, region, accountnumber, UserPoolClient, UserPoolId)
   }
   else {
     // its invalid token
@@ -155,7 +160,7 @@ export const handler = async (event, context) => {
   return result
 }
 
-async function main (context, event, rdsclient, asgclient, ec2client, ddclient, ssmclient, s3client, cipcclient, accclient, commonshared, authenticationshared, _, userattributes, region, accountnumber, UserPoolClient, UserPoolId) {
+async function main (context, event, rdsclient, asgclient, ec2client, ddclient, ssmclient, s3client, cipcclient, accclient, docClient, commonshared, authenticationshared, _, userattributes, region, accountnumber, UserPoolClient, UserPoolId) {
   console.log('main')
 
   var stepfunction = false
@@ -187,6 +192,7 @@ async function main (context, event, rdsclient, asgclient, ec2client, ddclient, 
     Operation: service + ':' + apicall
   }
   var authorization = authenticationshared.authorize(_, commonshared, action, userattributes)
+  //var authorization = authorize(_, commonshared, action, userattributes)
   if (authorization.status !== 'Allow') {
     // request not authorized
     var responsecode = 400
@@ -199,6 +205,61 @@ async function main (context, event, rdsclient, asgclient, ec2client, ddclient, 
       case 'autoscaling':
         const asgcommand = new DescribeAutoScalingGroupsCommand(JSON.parse(parameters))
         var result = JSON.stringify((await asgclient.send(asgcommand)))
+        break
+      case 'blob':
+        // parse client request to get the storage account names
+        var clientrequest=JSON.parse(parameters)
+        
+        if (clientrequest.Path !== undefined){
+          //get the storage account names from the request, providing its a request to list container content
+          
+          var storageaccountnames=clientrequest.Path.map(p => p.replace('blob://','').split('/')[0])
+          storageaccountnames= _.uniqWith(storageaccountnames.map(sa => sa), _.isEqual)
+        }
+        else if (clientrequest.Accounts !== "*"){
+          //List specific storage accounts from parameter store
+          var storageaccountnames=clientrequest.Accounts
+          storageaccountnames= _.uniqWith(storageaccountnames.map(sa => sa), _.isEqual)
+        }
+        else {
+          //List All storage accounts from parameter store
+          var accountkeys = await checkAzureBlobIntegration(ssmclient, ddclient, PutItemCommand, commonshared)
+          var storageaccountnames = accountkeys.map(a =>a.Name.split('/').slice(-1)[0])
+        }
+        
+       //await cachestgaccountkeys(ssmclient, ddclient, storageaccountnames, ssmcache)
+       await commonshared.cachestgaccountkeys(commonshared, ssmclient, ddclient, storageaccountnames, ssmcache, GetParameterCommand, PutItemCommand)
+
+        
+        if (apicall === 'ListContainers') {
+          let EnumerationDepth =clientrequest.EnumerationDepth
+          let Paths = clientrequest.Path
+          //let prefixes = await listContainerPrefixes(EnumerationDepth, Paths, ssmcache)
+          let prefixes = await commonshared.listContainerPrefixes(jp, BlobServiceClient, commonshared, Paths, EnumerationDepth, ssmcache)
+          let formatedhierarchy={}
+            prefixes.map(b=> {
+              //Object.assign was not working reliably for nested properties hence _.merge
+                _.merge(formatedhierarchy, b)
+            })
+            
+            Object.keys(formatedhierarchy).map(fh => {
+              let keyname ='/Logverz/Storage/Azure/StgA/'+ fh
+              let keyvalue= JSON.parse(ssmcache.chain().find({Name: keyname}).data()[0].Value)
+              formatedhierarchy[fh]['stgaccproperties']={"Location":keyvalue.Location,"SubscriptionID":keyvalue.SubscriptionID}  
+            })
+
+          var result =JSON.stringify(formatedhierarchy)
+          //console.log(result)
+        }
+        else if (apicall === "ListAccounts"){
+
+          let formatedhierarchy = await listAccounts(storageaccountnames, ssmcache)
+          var result =JSON.stringify(formatedhierarchy)
+          //console.log(result)
+        }
+        else{
+
+        }
         break
       case 'rds':
 
@@ -249,8 +310,14 @@ async function main (context, event, rdsclient, asgclient, ec2client, ddclient, 
 
         break
       case 'ec2':
-        const ec2command = new DescribeInstancesCommand(JSON.parse(parameters))
-        var result = await ec2client.send(ec2command)
+
+        if (apicall === 'DescribeInstances') {
+          const ec2command = new DescribeInstancesCommand(JSON.parse(parameters))
+          var result = JSON.stringify((await ec2client.send(ec2command)).Reservations[0].Instances[0])
+        }
+        else{
+          console.log("malformed request")
+        }
         break
       case 'cloudformation':
         if (apicall === 'SignalResource') {
@@ -272,15 +339,13 @@ async function main (context, event, rdsclient, asgclient, ec2client, ddclient, 
           console.log('unhandled cfn command')
         }
         break
-      // case 'codebuild':
-      // apicall = apicalltranslator(apicall)
-      // var result = JSON.stringify(await cb[apicall](parameters).promise())
-      // break
       case 'ssm':
         parameters = JSON.parse(parameters)
+        //explicitely setting WithDecryption false so if a malicoius request comes with true its overwritten. So requestor can only retrive non secret parameters.
+        parameters.WithDecryption =false
         if (apicall === 'GetParameter') {
           const details = {
-            source: 'info.js:main/getssmparameter',
+            source: 'info.js:main/ssm/getssmparameter',
             message: ''
           }
           var result = JSON.stringify(await commonshared.getssmparameter(ssmclient, GetParameterCommand, parameters, ddclient, PutItemCommand, details))
@@ -291,28 +356,27 @@ async function main (context, event, rdsclient, asgclient, ec2client, ddclient, 
 
         break
       case 'iam':
-        var Admin = false
-        var adminuser = false
-        var adminGmember = false
-        var poweruser = false
-
-        if (userattributes.Policies.UserAttached.length !== 0) {
-          adminuser = userattributes.Policies.UserAttached.map(p => JSON.parse(p).PolicyName === 'AdministratorAccess').includes(true)
+      
+        let requestoridentity ={
+          Type: userattributes.Type,
+          Name: userattributes.Name
         }
-        if (userattributes.Policies.GroupAttached.length !== 0) {
-          adminGmember = userattributes.Policies.GroupAttached.map(p => JSON.parse(p).PolicyName === 'AdministratorAccess').includes(true)
-        }
-        if (userattributes.IAMGroups.map(g => g === 'LogverzPowerUsers' + '-' + region).includes(true)) {
-          poweruser = true
-        }
+        const [Admin, poweruser,azurekeys] = await Promise.all([
+          authenticationshared.admincheck(_, docClient, QueryCommand, identities, requestoridentity),
+          authenticationshared.powerusercheck(_, docClient, QueryCommand, identities, requestoridentity, region),
+          checkAzureBlobIntegration(ssmclient, ddclient, PutItemCommand, commonshared)
+        ])
 
         if ((apicall === 'GetGroup') && (event.queryStringParameters.username === 'self')) {
-          if (adminuser || adminGmember) {
-            Admin = true
-          }
-          // https://docs.aws.amazon.com/AWSJavaScriptSDK/v3/latest/client/account/command/GetContactInformationCommand/
           const command = new GetContactInformationCommand({})
           const info = (await accclient.send(command)).ContactInformation.CompanyName
+          let azurestatus
+          if(azurekeys.length >=1){
+             azurestatus = true
+          }
+          else{
+             azurestatus = false
+          }
 
           var result = JSON.stringify({
             Admin,
@@ -321,7 +385,8 @@ async function main (context, event, rdsclient, asgclient, ec2client, ddclient, 
             UserName: userattributes.Name + ':' + userattributes.Type,
             IamGroups: userattributes.IAMGroups.map(i => i + ':GroupAWS'),
             AccountId: accountnumber,
-            AccountOwner: info
+            AccountOwner: info,
+            Azure: azurestatus
           })
         }
         break
@@ -600,22 +665,62 @@ async function GetConfiguration (directory, value) {
   return data
 }
 
-async function ListBlobStorage(){
-  const account = "logleadstest1"
-  const sas = "/?sv=2022-11-02&ss=b&srt=sco&sp=rlitf&.....SECRET...."
-  const blobServiceClient = new BlobServiceClient(`https://${account}.blob.core.windows.net${sas}`)
-
-  const options = {
-    includeDeleted: false,
-    includeMetadata: true,
-    includeSystem: true,
-//    prefix: containerNamePrefix
-  }
-
-  let i = 1;
-  const containers = blobServiceClient.listContainers(options);
-  for await (const container of containers) {
-    console.log(`Container ${i++}: ${container.name}`);
-  }
+async function checkAzureBlobIntegration(ssmclient, ddclient, PutItemCommand, commonshared){
   
+  const parameters = {
+    ParameterFilters: [
+      {
+        Key: "Name",
+        Option: "BeginsWith",
+        Values: ["/Logverz/Storage/Azure/StgA/"]
+      }
+    ]
+  };
+
+  const result =JSON.parse(await describessmparameters(ssmclient, ddclient, PutItemCommand, commonshared, parameters))
+  return result
+
+}
+
+async function listAccountsContainers(sasUrl,account) {
+  const blobServiceClient = new BlobServiceClient(sasUrl);
+
+  console.log("Listing account "+account+ " for containers");
+  let containerlist={}
+  containerlist[account]={}
+  let i = 1;
+  for await (const container of blobServiceClient.listContainers()) {
+    containerlist[account][container.name]={}
+  }
+
+  return containerlist
+}
+
+async function listAccounts(storageaccountnames, ssmcache){
+
+  let contentpromise= storageaccountnames.map(account => new Promise((resolve, reject) =>{ {
+            
+    let keyname ='/Logverz/Storage/Azure/StgA/'+account
+    let sas = ssmcache.chain().find({Name: keyname}).data()
+        sas=JSON.parse(sas[0].Value).token
+    let sasUrl = `https://${account}.blob.core.windows.net/?${sas}`
+    
+    resolve(listAccountsContainers(sasUrl,account))
+
+  }}))
+
+  let StorageAccounts= await Promise.all(contentpromise)
+  let formatedhierarchy={}
+
+  StorageAccounts.map(sa=> {
+    Object.assign(formatedhierarchy,sa)
+  })
+
+  Object.keys(formatedhierarchy).map(fh=> {
+    let keyname ='/Logverz/Storage/Azure/StgA/'+ fh
+    let keyvalue= JSON.parse(ssmcache.chain().find({Name: keyname}).data()[0].Value)
+    formatedhierarchy[fh]['stgaccproperties']={"Location":keyvalue.Location,"SubscriptionID":keyvalue.SubscriptionID} 
+  })
+
+  return formatedhierarchy
 }

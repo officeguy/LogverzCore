@@ -1222,6 +1222,113 @@ function getdayName (d) {
   return weekday[d.getDay()]
 }
 
+const cachestgaccountkeys = async(commonshared, ssmclient, ddclient, storageaccountnames, ssmcache, GetParameterCommand, PutItemCommand) =>{
+  // with the storage account names check if corresponding SSM parameter store key is in memory if not retive key, to get the authentication tokens.
+  let getkeyspromise= storageaccountnames.map(san =>new Promise((resolve, reject) =>{ {
+
+    let keyname ='/Logverz/Storage/Azure/StgA/'+san
+    let ssmkey = ssmcache.chain().find({Name: san}).data()
+
+    if (ssmkey.length === 0) {
+      console.log('local cache EMPTY -> retriving ' +keyname+ ' parameter from parameter store') 
+
+      let details = {
+        source: 'info.js:main/blob/getssmparameter',
+        message: ''
+      }
+      let saskeyprm = {
+        Name: keyname,
+        WithDecryption: true
+      }
+
+      let ssmparameterresult = commonshared.getssmparameter(ssmclient, GetParameterCommand, saskeyprm, ddclient, PutItemCommand, details)
+      resolve(ssmparameterresult)
+    }
+    else{
+      resolve('exists')  
+    }
+  }}))
+
+  let missingkeys= await Promise.all(getkeyspromise)
+  missingkeys.map(mk => {
+    if (mk !== 'exists'){
+      ssmcache.insert(mk.Parameter)
+    }
+  })
+}
+
+const listPrefixesHierarchical= async (jp, BlobServiceClient, sasUrl, account, containerName, maxDepth = Infinity, prefix) => {
+  // https://learn.microsoft.com/en-us/azure/storage/blobs/storage-blobs-list-javascript?tabs=javascript
+  const blobServiceClient = new BlobServiceClient(sasUrl);
+  const containerClient = blobServiceClient.getContainerClient("");
+
+  const adjusteddepth= prefix.split('/').length-1 + maxDepth
+  const root = {}
+  root[account]={}
+  root[account][containerName]={}
+
+  await traversepath4prefixes(jp, containerClient, root, account, prefix, containerName, adjusteddepth)
+  return root;
+  
+}
+
+async function traversepath4prefixes(jp, containerClient, root, account, prefix, containerName, maxDepth) {
+  const iterator = containerClient.listBlobsByHierarchy("/",{ prefix});
+  
+  for await (const blob of iterator) {
+    const segments = blob.name.split("/");
+    //const vdirpath= blob.name.slice(0, blob.name.length-1).replaceAll('/','.')
+    const vdirpath= blob.name.slice(0, blob.name.length-1).split('/').map(p => { return '["'+p+'"]' }).join().replaceAll('],',']')
+
+    let currentLevel = root;
+    //console.log("\n"+vdirpath)
+    
+    if (blob.kind === 'prefix' && (segments.length-1 < maxDepth)){
+      //console.log("+")
+      //The folder is under the max depth.
+        jp.value(currentLevel, `$.${account}.${containerName}${vdirpath}`, {})
+      //jp.value(currentLevel, `$.${account}.${containerName}.${vdirpath}`, {})
+      
+      let prefix = blob.name
+      //recursively calling the newly received prefix for underlying prefixes
+      await traversepath4prefixes(jp, containerClient, root, account, prefix, containerName, maxDepth)
+      
+    }
+    else if (blob.kind === 'prefix' && (segments.length-1 >= maxDepth)){
+      //The folder is at the max depth we signal it with a *
+      //console.log("*")
+        jp.value(currentLevel, `$.${account}.${containerName}${vdirpath}`, {})
+      //jp.value(currentLevel, `$.${account}.${containerName}.${vdirpath}`, '*')
+      
+    }
+    else{
+      //its a file not relevant for building the folder structure- hierarchy
+      //console.log("skipp")
+    } 
+    
+  }
+}
+
+const listContainerPrefixes = async(jp, BlobServiceClient, commonshared, Paths, EnumerationDepth, ssmcache) => {
+  
+  let contentpromise= Paths.map(pth => new Promise((resolve, reject) =>{ {
+    
+    let account = pth.replace('blob://','').split('/')[0]
+    let containerName =pth.split(account)[1].split('/')[1]
+    let prefix = pth.split(containerName+"/")[1]
+    let keyname ='/Logverz/Storage/Azure/StgA/'+account
+    let sas = ssmcache.chain().find({Name: keyname}).data()
+        sas=JSON.parse(sas[0].Value).token
+    let connectionString=`https://${account}.blob.core.windows.net/${containerName}?${sas}`
+    let result = commonshared.listPrefixesHierarchical(jp, BlobServiceClient, connectionString, account, containerName, EnumerationDepth, prefix)
+
+    resolve(result)
+
+  }}))
+
+  let prefixes= await Promise.all(contentpromise)
+  return prefixes
+}
 
 export {
   getssmparameter, setssmparameter, receiveSQSMessage, makeid, timeConverter, AddDDBEntry, SelectDBfromRegistry, 
@@ -1229,5 +1336,5 @@ export {
   eventpropertylookup, propertyvaluelookup, getcookies, S3GET, s3putdependencies, emptybucket,
   GroupAsgInstances, GetEC2InstancesMetrics, GetRDSInstancesMetrics, CreatePeriod, average, getbuildstatus,
   walkfolders, TransformInputValues, ASGstatus, deactivatequery, masktoken, maskcredentials, CFNExecutionIdentity,
-  JobExecutionAuthorization, invokelambda, RecordQuery
+  JobExecutionAuthorization, invokelambda, RecordQuery, cachestgaccountkeys, listPrefixesHierarchical, listContainerPrefixes
 }

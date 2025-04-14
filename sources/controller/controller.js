@@ -9,6 +9,9 @@ import path from 'path'
 import fs from 'fs'
 import https from 'https'
 import _ from 'lodash'
+import loki from 'lokijs'
+import jp from 'jsonpath'
+
 import { Sequelize, Op } from 'sequelize'
 import Bottleneck from 'bottleneck'
 import { NodeHttpHandler } from '@smithy/node-http-handler'
@@ -23,6 +26,7 @@ import { ServiceQuotasClient, GetServiceQuotaCommand } from '@aws-sdk/client-ser
 import { CloudWatchClient, GetMetricDataCommand } from '@aws-sdk/client-cloudwatch'
 import { EC2Client, paginateDescribeNetworkInterfaces } from '@aws-sdk/client-ec2'
 import { RDSClient,  DescribeDBInstancesCommand } from '@aws-sdk/client-rds'
+import { BlobServiceClient } from '@azure/storage-blob'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -107,6 +111,17 @@ if (PreferedWorkerNumber === 'auto') {
 else {
   var socketnumber = Math.max(100, Math.round(PreferedWorkerNumber * 1.2))
 }
+
+var db = new loki('db.json', {
+  autoupdate: true
+})
+
+
+var MaximumCacheTime = 10
+
+var ssmcache = db.addCollection('SsmParameters-cache', {
+  ttl: MaximumCacheTime * 60 * 1000
+})
 
 // console.log('typeof StgSelectParameter')
 // console.log(typeof StgSelectParameter )
@@ -229,34 +244,73 @@ async function main (defaultsqsmessagesize, rdsclient, cbclient, sqsclient, ssmc
   const z1 = performance.now()
 
   console.log('2.) Starting walk folders, elipsed time from the beginning (in seconds) is ' + ((z1 - z0) / 1000).toFixed(2))
-  // TODO: CACHE MODE which  SAVE sallKeys to S3 than read it from there
-  const s3client = new S3Client({})
-  tobeprocessed = await commonshared.TransformInputValues(s3client, GetBucketLocationCommand, StgFolders, StgEnumerationDepth, _)
+  if (StgFolders.match("s3://") != null){
+    // TODO: CACHE MODE which  SAVE sallKeys to S3 than read it from there
+    const s3client = new S3Client({})
+    tobeprocessed = await commonshared.TransformInputValues(s3client, GetBucketLocationCommand, StgFolders, StgEnumerationDepth, _)
 
-  do {
-    await commonshared.walkfolders(_, ListObjectsV2Command, ddclient, PutItemCommand, commonshared, tobeprocessed, subfolderlist, getCommonPrefixes, 'controller.js', jobid)
+    do {
+      await commonshared.walkfolders(_, ListObjectsV2Command, ddclient, PutItemCommand, commonshared, tobeprocessed, subfolderlist, getCommonPrefixes, 'controller.js', jobid)
+    }
+    while (((subfolderlist.length + tobeprocessed.length) !== 0) && (tobeprocessed.length !== 0))
+    const z2 = performance.now()
+    console.log('3.) Finished walk folders, elipsed time (in seconds) ' + ((z2 - z1) / 1000).toFixed(2) + ' from start walking folder and ' + ((z2 - z0) / 1000).toFixed(2) + ' from the beginning\n4.) Starting enumerating keys, this could take couple of minutes or more depending on the data volume')
+
+    const alltasksresolved = await s3limiter.schedule(() => {
+      const allTasks = subfolderlist.map(
+        subfolderarrayitem => getAllKeys(subfolderarrayitem[4], {
+          Bucket: subfolderarrayitem[1],
+          Prefix: subfolderarrayitem[0],
+          Delimiter: subfolderarrayitem[2]
+        })
+      )
+      return Promise.all(allTasks)
+    })
+    var allKeys = _.flatten(alltasksresolved)
+    const z3 = performance.now()
+    console.log('5.) Finished enumerating keys elipsed time (in seconds) ' + ((z3 - z2) / 1000).toFixed(2) + ' from finised walking folders and ' + ((z2 - z0) / 1000).toFixed(2) + ' from the beginning')
+   
+    allKeys = allKeys.filter(item => item[0].endsWith('/') === false) // to remove directories
+    var sumfilesize = allKeys.map(s =>s[3]).reduce((accumulator, currentValue) => accumulator + currentValue,0)
+    console.log('\nThe number of files in specified bucket(s) ' + allKeys.length+' total file size '+sumfilesize + ' KB. Current local time:' + commonshared.timeConverter(Date.now()) + '\n\n')
+  
   }
-  while (((subfolderlist.length + tobeprocessed.length) !== 0) && (tobeprocessed.length !== 0))
-  const z2 = performance.now()
-  console.log('3.) Finished walk folders, elipsed time (in seconds) ' + ((z2 - z1) / 1000).toFixed(2) + ' from start walking folder and ' + ((z2 - z0) / 1000).toFixed(2) + ' from the beginning\n4.) Starting enumerating keys, this could take couple of minutes or more depending on the data volume')
+  else if( StgFolders.match("blob://") != null){
+    let storageaccountnames=StgFolders.split(';').map(p => p.replace('blob://','').split('/')[0])
+    storageaccountnames= _.uniqWith(storageaccountnames.map(sa => sa), _.isEqual)
+    await commonshared.cachestgaccountkeys(commonshared, ssmclient, ddclient, storageaccountnames, ssmcache, GetParameterCommand, PutItemCommand)
+    let prefixes = await commonshared.listContainerPrefixes(jp, BlobServiceClient, commonshared, StgFolders.split(';'), StgEnumerationDepth, ssmcache)
 
-  const alltasksresolved = await s3limiter.schedule(() => {
-    const allTasks = subfolderlist.map(
-      subfolderarrayitem => getAllKeys(subfolderarrayitem[4], {
-        Bucket: subfolderarrayitem[1],
-        Prefix: subfolderarrayitem[0],
-        Delimiter: subfolderarrayitem[2]
+    const z2 = performance.now()
+    console.log('3.) Finished walk folders, elipsed time (in seconds) ' + ((z2 - z1) / 1000).toFixed(2) + ' from start walking folder and ' + ((z2 - z0) / 1000).toFixed(2) + ' from the beginning\n') 
+    let listofprefixes=[]
+    prefixes.map(p=> {
+      //Object.assign was not working reliably for nested properties hence _.merge
+      let leaves = paths(p)
+      leaves.map(l=> {
+        listofprefixes.push(l.join('/'))
       })
-    )
-    return Promise.all(allTasks)
-  })
+    })
+    console.log("list storage account prefixes in parallel:")
+    listofprefixes.map(lp=>{console.log(lp)})
 
-  const z3 = performance.now()
-  console.log('5.) Finished enumerating keys elipsed time (in seconds) ' + ((z3 - z2) / 1000).toFixed(2) + ' from finised walking folders and ' + ((z2 - z0) / 1000).toFixed(2) + ' from the beginning')
-  var allKeys = _.flatten(alltasksresolved)
-  var allKeys = allKeys.filter(item => item[0].endsWith('/') === false) // to remove directories
-  var sumfilesize = allKeys.map(s =>s[3]).reduce((accumulator, currentValue) => accumulator + currentValue,0)
-  console.log('\nThe number of files in specified bucket(s) ' + allKeys.length+' total file size '+sumfilesize + ' KB. Current local time:' + commonshared.timeConverter(Date.now()) + '\n\n')
+    let maxdepth = Math.max(..._.uniq(listofprefixes.map(m =>{
+      return m.split('/').length
+    })))
+    console.log('\n4. Starting enumerating blobs, this could take couple of minutes or more depending on the data volume\n')
+  
+    let allTasks = listofprefixes.map(oneprefix=> listPrefixParallel(ssmcache, oneprefix,maxdepth))
+    let allResults= await Promise.all(allTasks)
+    var allKeys = _.flatten(allResults)
+
+    const z3 = performance.now()
+    console.log('5.) Finished enumerating keys elipsed time (in seconds) ' + ((z3 - z2) / 1000).toFixed(2) + ' from finised walking folders and ' + ((z2 - z0) / 1000).toFixed(2) + ' from the beginning')
+   
+    allKeys = allKeys.filter(item => item[0].endsWith('/') === false) // to remove directories
+    console.log('\nThe number of files in specified bucket(s) ' + allKeys.length+'. Current local time:' + commonshared.timeConverter(Date.now()) + '\n\n')
+
+  }
+
 
   // TODO: dontwait for all files to be enumerated but do file enumeration and SQL population in parralell
   // TODO: handle allkeys zero case (no acces to bucket or non existent bucket etc.)
@@ -900,3 +954,75 @@ dP   dP   dP                            oo
                                                          .88 
                                                      d8888P 
 `
+
+
+async function listPrefixParallel(ssmcache, pfx, maxdepth) {
+  // https://learn.microsoft.com/en-us/azure/storage/blobs/storage-blobs-list-javascript?tabs=javascript
+
+  let results = []
+  let account = pfx.replace('blob://','').split('/')[0]
+  let containerName =pfx.split(account)[1].split('/')[1]
+  let prefix = pfx.split(containerName+"/")[1]
+  let keyname ='/Logverz/Storage/Azure/StgA/'+account
+  let sas = ssmcache.chain().find({Name: keyname}).data()
+      sas=JSON.parse(sas[0].Value).token
+
+  let depth =pfx.split('/').length
+
+  if (containerName !== undefined){
+    let connectionString=`https://${account}.blob.core.windows.net/${containerName}?${sas}`
+
+    const blobServiceClient = new BlobServiceClient(connectionString);
+    const containerClient = blobServiceClient.getContainerClient("");
+    
+    if(prefix ===undefined){
+      // in case we list the top level of the container
+      prefix ="/"
+    }
+
+    if (depth < maxdepth){
+      // if the depth is not the max depth than we only list the file on the specific level
+      for await (const item of containerClient.listBlobsByHierarchy('/', { prefix})) {
+        if (item.kind !== 'prefix'){
+          results.push(`blob://${account}/${containerName}/${item.name}`)
+          //console.log(`${account}/${containerName}/${item.name}`);
+        }
+      }
+    }
+    else{
+      // if the depth has reached the max depth than we recursively list the files
+       for await (const blob of containerClient.listBlobsFlat({ prefix})) {
+
+        if (blob.kind !== 'prefix'){
+          results.push(`blob://${account}/${containerName}/${blob.name}`)
+          //console.log(`${account}/${containerName}/${blob.name}`);
+        }
+
+       }
+    }
+  }
+  return results;
+}
+
+function paths(root) {
+  //kudos:  https://lowrey.me/getting-all-paths-of-an-javascript-object/
+  let paths = [];
+  let nodes = [{
+    obj: root,
+    path: []
+  }];
+  while (nodes.length > 0) {
+    let n = nodes.pop();
+    Object.keys(n.obj).forEach(k => {
+      if (typeof n.obj[k] === 'object') {
+        let path = n.path.concat(k);
+        paths.push(path);
+        nodes.unshift({
+          obj: n.obj[k],
+          path: path
+        });
+      }
+    });
+  }
+  return paths;
+}
