@@ -187,8 +187,11 @@ export const handler = async (event, context) => {
         message: ''
       }
       
+      let exechkeydeleted = true
       let ExecutionHistoryValue =  await commonshared.getssmparameter(ssmclient, GetParameterCommand, { Name: ExecutionHistory }, ddclient, PutItemCommand, details)
-      let exechkeydeleted = (ExecutionHistoryValue.indexOf("ParameterNotFound: UnknownError") !==-1)
+      if (typeof ExecutionHistoryValue === 'object'){
+        exechkeydeleted= false
+      }
 
       console.log("SSM deleted:")
       console.log(exechkeydeleted)
@@ -202,13 +205,15 @@ export const handler = async (event, context) => {
         return await commonshared.newcfnresponse(event, context, 'SUCCESS', {})
       }
       else{
-        const input = { // GetBucketNotificationConfigurationRequest
-          Bucket: S3bucket
-        };
-        const command = new GetBucketNotificationConfigurationCommand(input);
-        const bucketNotificationConfiguration = (await s3client.send(command)).QueueConfigurations;
-        let bucketconfigurationresult = await setbucketseventsconfiguration(s3client, S3bucket, S3Prefix, S3Suffix, notificationid, JOBQueueARN, bucketNotificationConfiguration, event.RequestType)
-        console.log(bucketconfigurationresult)
+        //no need to remove the bucket notification as part of the update process the stale record is automatically removed.
+        // const input = { // GetBucketNotificationConfigurationRequest
+        //   Bucket: S3bucket
+        // };
+        // const command = new GetBucketNotificationConfigurationCommand(input);
+        // const bucketNotificationConfiguration = (await s3client.send(command)).QueueConfigurations;
+        // let bucketconfigurationresult = await setbucketseventsconfiguration(s3client, S3bucket, S3Prefix, S3Suffix, notificationid, JOBQueueARN, bucketNotificationConfiguration)
+        // console.log(bucketconfigurationresult)
+
         let lambdaconfigurationresult =  await setlambdasqseventmapping(lmdclient, JOBQueueARN, MaxBatchWaitTime, MaximumWorkerNumber, event.RequestType )
         console.log(lambdaconfigurationresult)
         console.log('CFN message3:')
@@ -366,7 +371,7 @@ export const handler = async (event, context) => {
         await engineshared.ConfigureDBCreateTables(sequelize, engineshared, envstate.dbparams, Model, SelectedModelPath, DataType)
        
         printbucketseventsconfiguration(envstate.bucketNotificationConfiguration,S3bucket)
-        let bucketconfigurationresult = await setbucketseventsconfiguration(s3client, S3bucket, S3Prefix, S3Suffix, notificationid, JOBQueueARN, envstate.bucketNotificationConfiguration, event.RequestType)
+        let bucketconfigurationresult = await setbucketseventsconfiguration(s3client, S3bucket, S3Prefix, S3Suffix, notificationid, JOBQueueARN, envstate.bucketNotificationConfiguration)
         console.log("Bucketconfigurationresult:")
         console.log(bucketconfigurationresult)
         let lambdaconfigurationresult = await setlambdasqseventmapping(lmdclient, JOBQueueARN, MaxBatchWaitTime, MaximumWorkerNumber, event.RequestType )
@@ -381,7 +386,7 @@ export const handler = async (event, context) => {
       else if(event.RequestType === "Delete"){
         //deleting old resources
         await engineshared.ConfigureDBDeleteTables(commonshared, event, identityresult, sequelize, Model, TableName, docClient, PutItemCommand, QueryCommand, UpdateCommand, ddclient, DBServerAlias )
-        let bucketconfigurationresult = await setbucketseventsconfiguration(s3client, S3bucket, S3Prefix, S3Suffix, notificationid, JOBQueueARN, envstate.bucketNotificationConfiguration, event.RequestType)
+        let bucketconfigurationresult = await setbucketseventsconfiguration(s3client, S3bucket, S3Prefix, S3Suffix, notificationid, JOBQueueARN, envstate.bucketNotificationConfiguration)
         //console.log(bucketconfigurationresult)
         let lambdaconfigurationresult =  await setlambdasqseventmapping(lmdclient, JOBQueueARN, MaxBatchWaitTime, MaximumWorkerNumber, event.RequestType )
         //console.log(lambdaconfigurationresult)
@@ -390,17 +395,19 @@ export const handler = async (event, context) => {
         //TODO handle case when the queue and DB name remains the same only the ingestion toggle on/off changes
         //deleting old resources
         await engineshared.ConfigureDBDeleteTables(commonshared, event, identityresult, sequelize, Model, OldTableName, docClient, PutItemCommand, QueryCommand, UpdateCommand, ddclient, DBServerAlias )
-        let bucketconfigurationresult = await setbucketseventsconfiguration(s3client, S3bucket, S3Prefix, S3Suffix, notificationid, OldJOBQueueARN, envstate.bucketNotificationConfiguration, event.RequestType)
+        
+        //no need to manually delete these resources as the cloudformation cleanup will do it automatically at the end of the stack update (UPDATE_COMPLETE_CLEANUP_IN_PROGRESS)
+        //let bucketconfigurationresult = await setbucketseventsconfiguration(s3client, S3bucket, S3Prefix, S3Suffix, notificationid, OldJOBQueueARN, envstate.bucketNotificationConfiguration)
         //console.log(bucketconfigurationresult)
-        let lambdaconfigurationresult =  await setlambdasqseventmapping(lmdclient, OldJOBQueueARN, MaxBatchWaitTime, MaximumWorkerNumber, event.RequestType )
-        //console.log(lambdaconfigurationresult)
+        // let lambdaconfigurationresult =  await setlambdasqseventmapping(lmdclient, OldJOBQueueARN, MaxBatchWaitTime, MaximumWorkerNumber, event.RequestType )
+        // console.log(lambdaconfigurationresult)
         
         //creating new resources
         await engineshared.ConfigureDBCreateTables(sequelize, engineshared, envstate.dbparams, Model, SelectedModelPath, DataType)
-        bucketconfigurationresult = await setbucketseventsconfiguration(s3client, S3bucket, S3Prefix, S3Suffix, notificationid, JOBQueueARN, envstate.bucketNotificationConfiguration, "Create")
-        //console.log(bucketconfigurationresult)
-        lambdaconfigurationresult = await setlambdasqseventmapping(lmdclient, JOBQueueARN, MaxBatchWaitTime, MaximumWorkerNumber, "Create" )
-        //console.log(lambdaconfigurationresult)
+        let bucketconfigurationresult = await setbucketseventsconfiguration(s3client, S3bucket, S3Prefix, S3Suffix, notificationid, JOBQueueARN, envstate.bucketNotificationConfiguration)
+        console.log(bucketconfigurationresult)
+        let lambdaconfigurationresult = await setlambdasqseventmapping(lmdclient, JOBQueueARN, MaxBatchWaitTime, MaximumWorkerNumber, "Create" )
+        console.log(lambdaconfigurationresult)
 
       }
       else{
@@ -534,119 +541,76 @@ function printbucketseventsconfiguration(QueueConfigurations,S3bucket){
   })
 }
 
-async function setbucketseventsconfiguration(s3client, S3bucket, S3Prefix, S3Suffix, notificationid, JOBQueueARN, bucketNotificationConfiguration, RequestType){
-  
-  let input
-  if (RequestType === "Create"){
-
-    let existconfig=bucketNotificationConfiguration.filter(bnc=> bnc.QueueArn === JOBQueueARN)
-    if (existconfig.length ===1 ){
-      bucketNotificationConfiguration=bucketNotificationConfiguration.filter(bnc=> bnc.QueueArn !== existconfig[0].QueueArn)
-      console.log('\nThere has been a stale config with the same queue as destination, removing it to be able to add current config')
-    }
+function createbucketseventsconfiguration(S3bucket, notificationid, JOBQueueARN, S3Prefix, S3Suffix){
+  //response.
+ let input = { // PutBucketNotificationConfigurationRequest
+    Bucket: S3bucket, // required
+    NotificationConfiguration: { // NotificationConfiguration
     
-    input = { // PutBucketNotificationConfigurationRequest
-      Bucket: S3bucket, // required
-      NotificationConfiguration: { // NotificationConfiguration
-      
-        QueueConfigurations: [ // QueueConfigurationList
-          { // QueueConfiguration
-            Id: notificationid,
-            QueueArn: JOBQueueARN, // required
-            Events: [ // required
-              "s3:ObjectCreated:Put",
-              "s3:ObjectCreated:Copy",
-              "s3:ObjectCreated:Post",
-              "s3:ObjectCreated:CompleteMultipartUpload"
-            ],
-            Filter: {
-              Key: {
-                FilterRules: [
-                  {
-                    Name: "prefix",
-                    Value: S3Prefix,
-                  },
-                  {
-                    Name: "suffix",
-                    Value: S3Suffix,
-                  }
-                ],
-              },
+      QueueConfigurations: [ // QueueConfigurationList
+        { // QueueConfiguration
+          Id: notificationid,
+          QueueArn: JOBQueueARN, // required
+          Events: [ // required
+            "s3:ObjectCreated:Put",
+            "s3:ObjectCreated:Copy",
+            "s3:ObjectCreated:Post",
+            "s3:ObjectCreated:CompleteMultipartUpload"
+          ],
+          Filter: {
+            Key: {
+              FilterRules: [
+                {
+                  Name: "prefix",
+                  Value: S3Prefix,
+                },
+                {
+                  Name: "suffix",
+                  Value: S3Suffix,
+                }
+              ],
             },
           },
-        ]
-      },
-      SkipDestinationValidation: true,
-    }
-
-    //adding back to the the existing Configuration
-    for (let i = 0; i < bucketNotificationConfiguration.length; i++) {
-      input.NotificationConfiguration.QueueConfigurations.push(bucketNotificationConfiguration[i])
-    }
-  }
-  else if (RequestType === "Delete" || RequestType === "Update" ){
-    
-    let existconfig=bucketNotificationConfiguration.filter(bnc=> bnc.QueueArn === JOBQueueARN)
-
-    if (existconfig.length === 1 ){
-      bucketNotificationConfiguration=bucketNotificationConfiguration.filter(bnc=> bnc.QueueArn !== existconfig[0].QueueArn)
-      console.log('\nBased on the received request, removing the bucket notification configuration')
-    }
-
-    input = { // PutBucketNotificationConfigurationRequest
-      Bucket: S3bucket, // required
-      NotificationConfiguration: { // NotificationConfiguration
-        QueueConfigurations: [ // QueueConfigurationList
-        ]
-      },
-      SkipDestinationValidation: true,
-    }
-
-    bucketNotificationConfiguration.map(c => {
-
-      let existingS3Prefix = c.Filter.Key.FilterRules.filter(f => f.Name ==="Prefix")[0]
-      let existingS3Suffix = c.Filter.Key.FilterRules.filter(f => f.Name ==="Suffix")[0]
-
-      if (existingS3Prefix !== undefined){
-        existingS3Prefix= existingS3Prefix.Value
-      }
-      else{
-        existingS3Prefix=""
-      }
-
-      if (existingS3Suffix !== undefined){
-        existingS3Suffix= existingS3Suffix.Value
-      }
-      else{
-        existingS3Suffix=""
-      }
-
-      let oneconfig={ // QueueConfiguration
-        Id: c.Id,
-        QueueArn: c.QueueArn, // required
-        Events: [ // required
-          "s3:ObjectCreated:Put",
-          "s3:ObjectCreated:Copy",
-          "s3:ObjectCreated:Post",
-          "s3:ObjectCreated:CompleteMultipartUpload"
-        ],
-        Filter: {
-          Key: {
-            FilterRules: [
-              {
-                Name: "Prefix",
-                Value: existingS3Prefix
-              },
-              {
-                Name: "Suffix",
-                Value: existingS3Suffix
-              }
-            ],
-          },
         },
+      ]
+    },
+    SkipDestinationValidation: true,
+  }
+ return input 
+}
+
+async function setbucketseventsconfiguration(s3client, S3bucket, S3Prefix, S3Suffix, notificationid, JOBQueueARN, bucketNotificationConfiguration){
+  
+  let input
+
+  //removing old or stale config that has the same queue or folder (s3prefix) confgured.
+  bucketNotificationConfiguration=bucketNotificationConfiguration.map(bnc=> { 
+    let queuesame= bnc.QueueArn === JOBQueueARN 
+
+    let prefixsame = bnc.Filter.Key.FilterRules.map(f => {
+      if (f.Value === S3Prefix){
+        return true
+      } 
+      else {
+        return false
       }
-      input.NotificationConfiguration.QueueConfigurations.push(oneconfig)
-    })
+    }).includes(true)
+
+    if (queuesame || prefixsame){
+      console.log('\nBased on the received request, removing the bucket notification configuration')
+      console.log(JSON.stringify(bnc))
+      return false
+    }else{
+      return bnc
+    }
+
+  }).filter(f => f !== false)
+  
+  input = createbucketseventsconfiguration(S3bucket, notificationid, JOBQueueARN, S3Prefix, S3Suffix)
+
+  //adding back to the the existing Configuration
+  for (let i = 0; i < bucketNotificationConfiguration.length; i++) {
+    input.NotificationConfiguration.QueueConfigurations.push(bucketNotificationConfiguration[i])
   }
 
   console.log("\nThe new notification configuration: ")
@@ -656,9 +620,12 @@ async function setbucketseventsconfiguration(s3client, S3bucket, S3Prefix, S3Suf
   let response
   try {
     response = await s3client.send(command)
+    console.log("\nSUCCESS applying notification configuration: \n")
   }
   catch (e) {
     response=e
+    console.log("\nFAILED applying the new notification configuration: \n")
+    console.log(e)
   }
   return response
 }

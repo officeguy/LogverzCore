@@ -18,7 +18,8 @@ import pkg from 'tasktimer'
 import yauzl from 'yauzl'
 import pako from 'pako'
 
-import Papa from 'papaparse';
+import Papa from 'papaparse'
+import "@aws-sdk/crc64-nvme-crt"
 
 import { Sequelize, QueryTypes } from 'sequelize'
 import { S3Client, GetObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3'
@@ -285,6 +286,8 @@ async function filterdata(filearray, QueryString, commonshared, sequelize, Model
       matchingresult= matchingresult.map(r =>_.omit(r, 'id'))
       // convert data from string to json
       convertdatatosqlschema(matchingresult, SelectedModel, 'sqlite')
+      //testing
+      //let result =await TransformsModule.transformdata(filearray, transformconfigpath)
       convertdatatosqlschema(matchingresult, SelectedModel, DBEngineType)
       
       //inserting the matching converted data to the destination db

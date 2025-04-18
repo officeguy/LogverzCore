@@ -60,7 +60,7 @@
 		"QueryString": {
 			"Type": "String",
 			"Default": "",
-			"Description": "Specify here the S3 select query parameters. Syntax changes on datatype for example \"SELECT * FROM S3Object[*].Records[*] s\" or \"SELECT * FROM S3Object s\", for additional examples check https://docs.logverz.io/docs/Data%20Collection/CollectionRules For complex queries, before execution we recommend testing on the S3 console or CLI. "
+			"Description": "Specify here the select query parameters. Syntax changes on datatype for example \"SELECT * FROM <yourdatasetsname> AS tbl\", where <yourdatasetsname> is the value your provided in the corresponding parameter, for additional examples check https://docs.logverz.io/docs/Data%20Collection/CollectionRules For complex queries on large datset, before execution we recommend testing on small samples, part by part."
 		},
 		"DBServerAlias": {
 			"Type": "String",
@@ -69,7 +69,7 @@
 		},
 		"DatasetName": {
 			"Type": "String",
-			"Default": "datasetCC",
+			"Default": "yourdatasetsname",
 			"MinLength": "1",
 			"MaxLength": "63",
 			"Description": "Database table name, (make sure there are no white spaces) a name convention such as team_projectname_task or personname_issue_number max 63 characters. Please specify a unique name, otherwise the existing table will be overwritten.Importatnt! Changing the name during an update replaces the DB table."
