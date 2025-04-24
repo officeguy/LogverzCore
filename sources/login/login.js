@@ -58,7 +58,8 @@ export const handler = async (event, context) => {
     var commonshared = await GetConfiguration(commonsharedpath, '*')
     var authenticationsharedpath = ('file:///' + path.join(__dirname, './shared/authenticationsharedv3.js').replace(/\\/g, '/'))
     var authenticationshared = await GetConfiguration(authenticationsharedpath, '*')
-    params.configfilelocation = '/tmp/config.ini' // .json
+    params.configfilelocation = ('file:///' +'/tmp/config.ini') // .json
+    //console.log(params.configfilelocation)
     params.UserPoolId = process.env.UserPoolId
     params.UserPoolPubKey = process.env.UserPoolPubKey
     params.APIGatewayURL = event.headers.Host
@@ -172,11 +173,11 @@ async function main (event, ssmclient, lmdclient, ddclient, docClient, commonsha
     // function is invoked via API GW for AWS IAM KEY AUTH
     var configcontent = '[clientprofile]\n'
     configcontent += 'aws_access_key_id=' + params.accesskey + '\n'
-    configcontent += 'aws_secret_access_key=' + params.secretkey + '\n'
+    configcontent += 'aws_secret_access_key=' + params.secretkey 
 
-    if (event.queryStringParameters.serialnumber !== undefined) {
-      configcontent += 'serialnumber=' + event.queryStringParameters.serialnumber + '\n'
-      configcontent += 'tokencode=' + event.queryStringParameters.tokencode + '\n'
+    if (event.queryStringParameters.serialnumber !== undefined && event.queryStringParameters.serialnumber !=='') {
+      configcontent += '\n'+ 'serialnumber=' + event.queryStringParameters.serialnumber + '\n'
+      configcontent += 'tokencode=' + event.queryStringParameters.tokencode
     }
 
     fs.writeFileSync(fileURLToPath(params.configfilelocation), configcontent, { flags: 'a' })
@@ -198,7 +199,7 @@ async function main (event, ssmclient, lmdclient, ddclient, docClient, commonsha
         Type: 'User' + domain
       }
 
-      var authorization = await ValidateUserAccess(commonshared, authenticationshared, docClient, requestoridentity, params)
+      var authorization = await ValidateUserAccess(authenticationshared, docClient, requestoridentity, params)
       if (authorization === true) {
         // Authentication success, Authorizatin success, user exits in database
         var token = authenticationshared.createtoken(jwt, domain, username, privateKey.Parameter.Value, passphrase.Parameter.Value, tokenconfig, 'User' + domain)
@@ -226,7 +227,7 @@ async function main (event, ssmclient, lmdclient, ddclient, docClient, commonsha
   return message
 } // main
 
-async function ValidateUserAccess (commonshared, authenticationshared, docClient, requestoridentity, params) {
+async function ValidateUserAccess (authenticationshared, docClient, requestoridentity, params) {
   // get the identity once and use in the checks
   var userattributes = await authenticationshared.getidentityattributes(docClient, QueryCommand, requestoridentity.Name, requestoridentity.Type)
  
@@ -463,7 +464,7 @@ function createrequestbody (type, accountnumber, username, password, mfavalue, m
 }
 
 async function createIAMAuthresponse (commonshared, authenticationshared, ddclient, docClient, state, domain, username, privateKey, passphrase, headers, AllowedOrigins) {
-  console.log('Authentication status: ' + state + ', User: ' + username)
+  console.log('Authentication status: ' + JSON.stringify(state) + ', User: ' + username)
 
   if (state === 'SUCCESS') {
     var requestoridentity = {
@@ -471,7 +472,7 @@ async function createIAMAuthresponse (commonshared, authenticationshared, ddclie
       Type: 'User' + domain // UserAWS
     }
 
-    var authorization = await ValidateUserAccess(commonshared, authenticationshared, docClient, requestoridentity, params)
+    var authorization = await ValidateUserAccess(authenticationshared, docClient, requestoridentity, params)
     console.log('Autorization status: ' + authorization)
 
     if (authorization === true) {
@@ -551,7 +552,7 @@ async function AwsIamKeyAuth (params, commonshared, ddclient) {
   })
   const gcicommand = new GetCallerIdentityCommand({})
   var identity = await stsclient.send(gcicommand)
-  console.log('switched identity to: ' + identity)
+  console.log('switched identity to: ' + JSON.stringify(identity))
   return result
 }
 

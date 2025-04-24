@@ -41,7 +41,7 @@ export const handler = async (event, context) => {
     var InitBucket = mydev.InitBucket
   }
 
-  var InfoPolicySid = 'DenySSMSecureStringAccessUsingKMS'
+  var InfoPolicySid = 'AllowSSMSecureStringAccessUsingKMS'
 
   const kmsclient = new KMSClient({})
   const rdsclient = new RDSClient({})
@@ -100,10 +100,10 @@ async function main (event, s3client, rdsclient, kmsclient, commonshared, InitBu
 
     var logic = JSON.parse(Buffer.from(await logiccontent.Body.transformToByteArray()).toString('utf-8'))
     var InfoPolicystatements = logic.Resources.LogverzInfoPolicy.Properties.PolicyDocument.Statement
-    var DenySSMIndex = InfoPolicystatements.findIndex(x => x.Sid === InfoPolicySid)
-    var originalstatement = InfoPolicystatements[DenySSMIndex]
+    var AllowSSMIndex = InfoPolicystatements.findIndex(x => x.Sid === InfoPolicySid)
+    var originalstatement = InfoPolicystatements[AllowSSMIndex]
     originalstatement.Resource = arn
-    logic.Resources.LogverzInfoPolicy.Properties.PolicyDocument.Statement[DenySSMIndex] = originalstatement
+    logic.Resources.LogverzInfoPolicy.Properties.PolicyDocument.Statement[AllowSSMIndex] = originalstatement
 
     if (customcontent.Code !== 'NoSuchKey') {
       var customconfig = JSON.parse(Buffer.from(await customcontent.Body.transformToByteArray()).toString('utf-8'))

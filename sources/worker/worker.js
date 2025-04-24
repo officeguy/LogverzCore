@@ -522,7 +522,7 @@ async function preprocessdata(source, bytestreamarray, StgSelectParameter, Trans
 
 async function preprocesss3data(bytestream, StgSelectParameter, TransformConfig, sequelize, SelectedModel, Model, engineshared, DBEngineType, ddclient, context ){
 
-  const filename = bytestream.Body.source.req.path.split('?')[0]
+  const filename = bytestream.Body.req.path.split('?')[0]
   const body = await sdkStreamMixin(bytestream.Body).transformToByteArray()
   
   //just for local testing not needed in production setup.

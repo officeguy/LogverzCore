@@ -283,10 +283,6 @@ async function heartbeatFunc (db, ASGName, idletime, heartbeatlocation) {
     var AutoScalingGroupNames = [ASGName]
     const asgsettings = await commonshared.ASGstatus(AutoScalingClient, paginateDescribeAutoScalingGroups, AutoScalingGroupNames)
 
-    // const asgsettings = await commonshared.GetAsgSettings(autoscaling, {
-    //   AutoScalingGroupNames: [ASGName]
-    // })
-
     const asgminimum = asgsettings[0].Instances.length === (asgsettings[0].MinSize)
     var contentobject = updateHearthbeatfilecontent(instanceId, userscollection, asgminimum)
 

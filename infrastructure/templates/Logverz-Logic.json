@@ -1905,8 +1905,8 @@
 							}]
 					},
 					{
-						"Sid": "DenySSMSecureStringAccessUsingKMS",
-						"Effect": "Deny",
+						"Sid": "AllowSSMSecureStringAccessUsingKMS",
+						"Effect": "Allow",
 						"Action": [
 							"kms:Decrypt",
 							"kms:GenerateDataKey"

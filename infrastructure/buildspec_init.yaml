@@ -1,11 +1,11 @@
 version: 0.2
 env:
   variables:
-    NODE_VERSION: "20.17.0"
+    NODE_VERSION: "20.19.0"
 phases:
   install:
     runtime-versions:
-      nodejs: 18
+      nodejs: 20
     commands:
       - echo Installing build dependencies...
       - curl -sS https://dl.yarnpkg.com/debian/pubkey.gpg | apt-key add -
@@ -18,7 +18,7 @@ phases:
       - initialpath=$(pwd)
       - aws s3 cp s3://$InitBucket/bin/sources.zip ./sources.zip && aws s3 cp s3://$InitBucket/bin/Portal.zip ./Portal.zip && aws s3 cp s3://$InitBucket/bin/PortalAccess.zip ./PortalAccess.zip
       - mkdir bin && mkdir PortalAccess && mkdir PortalAccess/src && mkdir Portal && mkdir sources && unzip -q sources.zip -d ./sources
-      - cd sources && chmod +x ./scripts/npminstall.sh ./scripts/zipcopy.sh ./scripts/appbuild.sh ./scripts/sidebar.sh ./scripts/pwshdl.sh ./scripts/lambdaupdate.sh
+      - cd sources && chmod +x ./scripts/npminstall.sh ./scripts/zipcopy.sh ./scripts/appbuild.sh ./scripts/sidebar.sh ./scripts/lambdaupdate.sh
       - cp ./scripts/appbuild.sh ../PortalAccess &&  cp ./scripts/sidebar.sh ../PortalAccess/src && cp ./scripts/appbuild.sh ../Portal
       - echo "Building Lambda functions"
       - ./scripts/npminstall.sh

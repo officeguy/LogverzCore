@@ -168,14 +168,6 @@ function set-init-sources{
     #which inturn deploys it in the client s3 bucket and starts codebuild to create 
     #1) initiate the Stack deployment 2) build lambda bundles, build webapp, build containers 
 
-    #write-host "project path" $projectpath
-    #write-host "builddirectory" $builddirectory
-    #write-host "componentpath path" $componentpath
-    #write-host "Extrafilescount" $extrafiles.count
-    #write-host "repositoryurl" $repositoryurl
-    #write-host "tag" $tag
-    #write-host "branchname" $branchname "`n`n`n"
-
     if($OSType -eq "Windows"){
         $zipcommand="7z"
         $gitcommand="git.exe"
@@ -194,11 +186,6 @@ function set-init-sources{
         $checkout="checkout $branchname"
     }
      
-    
-    $location = Invoke-Expression "pwd"
-    write-host "Present location: $location" 
-    write-host "Git checkout command:" $checkout
-
     Start-Process -FilePath $gitcommand -ArgumentList "fetch --all --tags"  -ErrorAction SilentlyContinue -Wait
     Start-Process -FilePath $gitcommand -ArgumentList $checkout  -ErrorAction SilentlyContinue -Wait
  
@@ -308,6 +295,18 @@ function set-init-sources{
     else {
         Copy-Item sources.zip "../init_core.zip"
     }
+
+
+    write-host "`nPresent location: $location" 
+    write-host "Git checkout command:" $checkout
+
+    write-host "project path" $projectpath
+    write-host "builddirectory" $builddirectory
+    write-host "componentpath path" $componentpath
+    write-host "Extrafilescount" $extrafiles.count
+    write-host "repositoryurl" $repositoryurl
+    write-host "tag" $tag
+    write-host "branchname" $branchname "`n`n`n"
 } 
 
 function build-webapp-source{

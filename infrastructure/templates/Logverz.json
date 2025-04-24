@@ -180,7 +180,7 @@
 		"TurnServerAmiId": {
 			"Description": "The Turn Server AMI ID as pare: https://documentation.ubuntu.com/aws/en/latest/aws-how-to/instances/find-ubuntu-images",
 			"Type": "AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>",
-			"Default": "/aws/service/canonical/ubuntu/server/20.04/stable/current/amd64/hvm/ebs-gp2/ami-id"
+			"Default": "/aws/service/canonical/ubuntu/server/24.04/stable/current/amd64/hvm/ebs-gp3/ami-id"
 		},
 		"myKeyPair" : {
 			"Description" : "Amazon EC2 Key Pair, optional, if added please use the *exact* case capitialisation as you see in the AWS console.",

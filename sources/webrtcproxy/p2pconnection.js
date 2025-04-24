@@ -314,13 +314,13 @@ const p2pconnection = async (req, res) => {
   })
 
   peer2.on('close', () => {
-    const username = user.chain().find({
-      ChannelName: peer2.channelName
-    }).collection.data[0].User
+    
+    //@ connection close event, finding the user properties from the db and removing it 
+    let position=user.chain().find({'ChannelName': { '$regex': new RegExp(peer2.channelName, 'i')}}).filteredrows[0]
+    let id = user.data[position].$loki
+    let username= user.data[position].User
+    user.remove(id)
     console.log('The server connection closed:\n' + 'username:' + username + '\nChannelname:' + peer2.channelName)
-    user.chain().find({
-      ChannelName: peer2.channelName
-    }).remove()
   })
 
   peer2.on('error', (err) => {
