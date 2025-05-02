@@ -521,8 +521,16 @@ async function preprocessdata(source, bytestreamarray, StgSelectParameter, Trans
 }
 
 async function preprocesss3data(bytestream, StgSelectParameter, TransformConfig, sequelize, SelectedModel, Model, engineshared, DBEngineType, ddclient, context ){
+  let filename
 
-  const filename = bytestream.Body.req.path.split('?')[0]
+  if (bytestream.Body.source !== undefined){
+     //some s3 responses have source property some does not, possible it is subject to when the data was saved,
+     // or which server the response is comming from, in any case to hande the difference we make this check 
+     filename = bytestream.Body.source.req.path.split('?')[0]
+  }
+  else{
+     filename = bytestream.Body.req.path.split('?')[0]
+  }
   const body = await sdkStreamMixin(bytestream.Body).transformToByteArray()
   
   //just for local testing not needed in production setup.
