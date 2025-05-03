@@ -369,6 +369,7 @@ export const handler = async (event, context) => {
         //creating new resources
         //configure database, add continous collection table and if its the first collection than additional system tables
         await engineshared.ConfigureDBCreateTables(sequelize, engineshared, envstate.dbparams, Model, SelectedModelPath, DataType)
+        //await ConfigureDBCreateTables(sequelize, engineshared, envstate.dbparams, Model, SelectedModelPath, DataType)
        
         printbucketseventsconfiguration(envstate.bucketNotificationConfiguration,S3bucket)
         let bucketconfigurationresult = await setbucketseventsconfiguration(s3client, S3bucket, S3Prefix, S3Suffix, notificationid, JOBQueueARN, envstate.bucketNotificationConfiguration)
@@ -485,8 +486,11 @@ async function GatherEnvCurrentState(commonshared, engineshared, authentications
   const input = { // GetBucketNotificationConfigurationRequest
     Bucket: S3bucket
   };
-  const command = new GetBucketNotificationConfigurationCommand(input);
-  const bucketNotificationConfiguration = (await s3client.send(command)).QueueConfigurations;
+  const command = new GetBucketNotificationConfigurationCommand(input)
+  let bucketNotificationConfiguration = (await s3client.send(command)).QueueConfigurations
+  if (bucketNotificationConfiguration === undefined){
+    bucketNotificationConfiguration =0
+  }
 
   envstate["Schema"]=Schema
   envstate["dbparams"]=dbparams
@@ -533,12 +537,15 @@ async function GetConfiguration (directory, value) {
 }
 
 function printbucketseventsconfiguration(QueueConfigurations,S3bucket){
-  //response.
-  QueueConfigurations.map(qc => {
-
-    console.log("\nName of Configuration: "+ qc.Id + "\nBucketname: "+ S3bucket + "\nDestination: "+ qc.QueueArn + " \nEvents: " +qc.Events + "\nConfigured filters: " +JSON.stringify(qc.Filter)) //+"\n"
-    //console.table(
-  })
+  
+  if(QueueConfigurations !== 0){
+    QueueConfigurations.map(qc => {
+      console.log("\nName of Configuration: "+ qc.Id + "\nBucketname: "+ S3bucket + "\nDestination: "+ qc.QueueArn + " \nEvents: " +qc.Events + "\nConfigured filters: " +JSON.stringify(qc.Filter)) //+"\n"
+    })
+  }
+  else{
+    console.log("\nThe "+S3bucket+" does not have event based configuration set")
+  }
 }
 
 function createbucketseventsconfiguration(S3bucket, notificationid, JOBQueueARN, S3Prefix, S3Suffix){
@@ -582,29 +589,32 @@ function createbucketseventsconfiguration(S3bucket, notificationid, JOBQueueARN,
 async function setbucketseventsconfiguration(s3client, S3bucket, S3Prefix, S3Suffix, notificationid, JOBQueueARN, bucketNotificationConfiguration){
   
   let input
+  //check if bucketNotificationConfiguration exists
+  if(bucketNotificationConfiguration !== 0) {
+    
+    bucketNotificationConfiguration=bucketNotificationConfiguration.map(bnc=> { 
 
-  //removing old or stale config that has the same queue or folder (s3prefix) confgured.
-  bucketNotificationConfiguration=bucketNotificationConfiguration.map(bnc=> { 
-    let queuesame= bnc.QueueArn === JOBQueueARN 
+      let queuesame= bnc.QueueArn === JOBQueueARN 
+      let prefixsame = bnc.Filter.Key.FilterRules.map(f => {
+        if (f.Value === S3Prefix){
+          return true
+        } 
+        else {
+          return false
+        }
+      }).includes(true)
 
-    let prefixsame = bnc.Filter.Key.FilterRules.map(f => {
-      if (f.Value === S3Prefix){
-        return true
-      } 
-      else {
+      if (queuesame || prefixsame){
+        //removing old or stale config that has the same queue or folder (s3prefix) configured.
+        console.log('\nBased on the received request, removing the bucket notification configuration')
+        console.log(JSON.stringify(bnc))
         return false
+      }else{
+        return bnc
       }
-    }).includes(true)
 
-    if (queuesame || prefixsame){
-      console.log('\nBased on the received request, removing the bucket notification configuration')
-      console.log(JSON.stringify(bnc))
-      return false
-    }else{
-      return bnc
-    }
-
-  }).filter(f => f !== false)
+    }).filter(f => f !== false)
+  }
   
   input = createbucketseventsconfiguration(S3bucket, notificationid, JOBQueueARN, S3Prefix, S3Suffix)
 

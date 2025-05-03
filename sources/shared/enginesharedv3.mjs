@@ -238,11 +238,15 @@ const ConfigureDBCreateTables = async (sequelize, engineshared, dbparams, Model,
     await CreateSQLTable(sequelize, Model, engineshared.ProcessingErrorsModel(dbparams.DBEngineType), 'ProcessingError', 'ProcessingErrors')
   }
 
-  // console.log("\nSelectedModelPath:"+SelectedModelPath)
-  // console.log(".....foldercontents.....")
-  // var directorycontents=fs.readdirSync("/tmp")
-  // console.log (directorycontents+ "\n\n\n\n")
-  const SelectedModel = (await import(SelectedModelPath)).SelectedModel //.replace(/\\/g, '/')
+  let SelectedModel
+  try {
+    SelectedModel = (await import(SelectedModelPath)).SelectedModel //.replace(/\\/g, '/')
+  }
+  catch(e){
+    console.log("error importing module, probable cause is a typo or other misconfiguration in the schema")
+    console.error(e)
+  }
+
 
   try {
     await CreateSQLTable(sequelize, Model, SelectedModel, QueryType, dbparams.DBTableName)
